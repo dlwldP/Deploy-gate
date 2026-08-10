@@ -162,7 +162,8 @@ jobs:
 
       - name: Show approval history
         if: always()
-        run: curl -s -H "Authorization: Bearer $APPROVER_ALICE_TOKEN" "http://localhost:8080/approval/history" | jq .
+        run: |
+          curl -s -H "Authorization: Bearer $APPROVER_ALICE_TOKEN" "http://localhost:8080/approval/history" | jq .
 
       - name: Show app log
         if: always()
