@@ -151,7 +151,7 @@ deploy-gate/
 
 ## 상태 및 MVP 범위
 
-✅ P1(MVP) · P2 완료, P3 일부 진행 중
+✅ P1(MVP) · P2 · P3 완료 (배포는 보류 — 아래 "배포 상태" 참고)
 
 ### P1 — MVP 핵심 ✅
 - `deployer` / `stack_policy` 데이터 모델 및 claim 매칭 로직
@@ -163,11 +163,15 @@ deploy-gate/
 - `POST /approval/request` + `approve`/`reject` 승인 대기 흐름
 - `approval_log` 감사 로그 및 `GET /approval/history` 조회 API
 
-### P3 — 확장
+### P3 — 확장 ✅
 - ✅ Actuator 기반 헬스체크 및 운영 모니터링 연동 (health/info/metrics), SQLite 영속화
 - ✅ 정책/claim 현황을 확인할 수 있는 관리 화면 (`frontend/`, React + TS) — 조회 전용으로 구현, 화면에서의 정책 수정(CRUD)은 미지원
 - ✅ Bearer 토큰 인증 및 4-eyes(자기 승인 차단) 적용
-- 다른 CDK 스택/멀티 프로젝트로 확장 가능한 범용 라이브러리화 검토 — 보류
+- ⏸️ 다른 CDK 스택/멀티 프로젝트로 확장 가능한 범용 라이브러리화 — 검토 후 스코프 아웃(보류), P3 완료 조건에서 제외
+
+### 배포 상태
+
+현재는 **미배포** 상태이며, 로컬/CI 환경에서의 빌드·테스트 검증만 유지합니다. 프로덕션 배포(토큰 실발급, 데모 시더 비활성화, 인프라 구성 등)는 별도 작업으로 남겨둡니다.
 
 ## 왜 이 프로젝트인가
 
