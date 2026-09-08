@@ -18,6 +18,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -290,6 +298,48 @@ class ApprovalControllerTest {
                     new ApprovalCheckRequest("jiye", "StagingApiStack", "DEPLOY_RETRY"), ApprovalCheckResponse.class);
             assertThat(recheck.getStatusCode()).isEqualTo(HttpStatus.OK);
         }
+    }
+
+    @Test
+    void twoApproversVotingAtOnceStillReachApproved() throws Exception {
+        // The vote tally is read-then-decide: without a guard, two simultaneous votes can
+        // each see only their own and leave a fully approved request stuck at PENDING.
+        String sha = "race001";
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_RACE", sha);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        try {
+            List<Future<ResponseEntity<String>>> votes = List.of(
+                    pool.submit(voteAt(barrier, created.id(), DemoDataSeeder.ALICE_TOKEN)),
+                    pool.submit(voteAt(barrier, created.id(), DemoDataSeeder.BOB_TOKEN)));
+
+            List<String> losers = new ArrayList<>();
+            if (votes.get(0).get().getStatusCode() == HttpStatus.CONFLICT) {
+                losers.add(DemoDataSeeder.ALICE_TOKEN);
+            }
+            if (votes.get(1).get().getStatusCode() == HttpStatus.CONFLICT) {
+                losers.add(DemoDataSeeder.BOB_TOKEN);
+            }
+            // A loser is told to retry, and the retry sees the winner's committed vote.
+            for (String token : losers) {
+                postNoBody("/approval/" + created.id() + "/approve", token, ApprovalActionResponse.class);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // Two distinct approvals happened, so the request must be usable -- never left pending.
+        ResponseEntity<ApprovalCheckResponse> check = checkProd("DEPLOY_RACE", sha);
+        assertThat(check.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(check.getBody().result()).isEqualTo("ALLOWED");
+    }
+
+    private Callable<ResponseEntity<String>> voteAt(CyclicBarrier barrier, Long requestId, String token) {
+        return () -> {
+            barrier.await();
+            return postNoBody("/approval/" + requestId + "/approve", token, String.class);
+        };
     }
 
     @Test

@@ -1,5 +1,6 @@
 package deploygate.validation;
 
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -50,6 +51,16 @@ public class GlobalExceptionHandler {
     })
     public ResponseEntity<Map<String, Object>> handleConflictException(RuntimeException exception) {
         return errorBody(HttpStatus.CONFLICT, "CONFLICT", exception.getMessage());
+    }
+
+    /**
+     * Two approvers voted at the same instant and one lost the version race. Nothing is
+     * wrong with the request itself, so the caller is told to simply vote again.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<Map<String, Object>> handleConcurrentVote(OptimisticLockingFailureException exception) {
+        return errorBody(HttpStatus.CONFLICT, "CONFLICT",
+                "another approver voted on this request at the same time; retry the vote");
     }
 
     private ResponseEntity<Map<String, Object>> errorBody(HttpStatus status, String result, String message) {

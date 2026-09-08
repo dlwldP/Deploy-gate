@@ -130,12 +130,17 @@ public class ApprovalRequestService {
             throw new DuplicateVoteException("approver has already voted on request #" + requestId);
         }
 
+        Instant votedAt = Instant.now();
         approvalVoteRepository.save(ApprovalVote.builder()
                 .requestId(requestId)
                 .approverId(approver.getId())
                 .decision(VoteDecision.APPROVE)
-                .decidedAt(Instant.now())
+                .decidedAt(votedAt)
                 .build());
+        // Touch the request so a simultaneous second vote loses the version race and
+        // retries, instead of both voters counting a tally that misses the other.
+        request.recordVote(votedAt);
+        approvalRequestRepository.save(request);
 
         long approvals = approvalVoteRepository.countByRequestIdAndDecision(requestId, VoteDecision.APPROVE);
         Deployer requester = deployerRepository.findById(request.getDeployerId()).orElseThrow();
@@ -165,14 +170,16 @@ public class ApprovalRequestService {
             throw new DuplicateVoteException("approver has already voted on request #" + requestId);
         }
 
+        Instant votedAt = Instant.now();
         approvalVoteRepository.save(ApprovalVote.builder()
                 .requestId(requestId)
                 .approverId(approver.getId())
                 .decision(VoteDecision.REJECT)
-                .decidedAt(Instant.now())
+                .decidedAt(votedAt)
                 .build());
 
-        request.reject(Instant.now());
+        request.recordVote(votedAt);
+        request.reject(votedAt);
         approvalRequestRepository.save(request);
 
         Deployer requester = deployerRepository.findById(request.getDeployerId()).orElseThrow();
