@@ -171,6 +171,7 @@ deploy-gate/
 | P1 | claim ↔ 정책 매칭 즉시 허용/거부, `POST /approval/check` | ✅ |
 | P2 | Single/Dual Approver, 승인 대기 요청·투표, 감사 로그 | ✅ |
 | P3 | Actuator·SQLite 영속화, 관리 화면, Bearer 인증 + 4-eyes | ✅ |
+| P4 | 승인 수명(커밋 바인딩·만료·단회), GitHub OIDC, 동시성 가드, action 기반 인가 | ✅ |
 | P3 스코프 아웃 | 멀티 프로젝트용 범용 라이브러리화 | ⏸️ 보류 |
 
 **배포 상태**: 현재 **미배포**, 로컬/CI 검증만 유지합니다. 프로덕션 배포(토큰 실발급, 데모 시더 비활성화 등)는 별도 작업입니다.
