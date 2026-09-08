@@ -47,7 +47,8 @@ public class ApprovalCheckService {
         return check(user, stack, action, null);
     }
 
-    public ApprovalResult check(String user, String stack, String action, String commitSha) {
+    public ApprovalResult check(String user, String stack, String rawAction, String commitSha) {
+        String action = DeployAction.normalize(rawAction);
         Deployer deployer = deployerRepository.findByName(user).orElse(null);
         if (deployer == null) {
             return ApprovalResult.denied("unknown deployer: " + user);
@@ -64,7 +65,7 @@ public class ApprovalCheckService {
         }
 
         if (stackPolicy.getApprovalLevel() == ApprovalLevel.NONE) {
-            ApprovalResult result = evaluate(deployer, stackPolicy);
+            ApprovalResult result = evaluate(deployer, stackPolicy, action);
             approvalLogService.record(user, stack, action, result.decision(), "SYSTEM", null);
             return result;
         }
@@ -81,7 +82,7 @@ public class ApprovalCheckService {
             }
         }
 
-        ApprovalResult result = evaluate(deployer, stackPolicy);
+        ApprovalResult result = evaluate(deployer, stackPolicy, action);
         if (result.decision() == Decision.DENIED) {
             approvalLogService.record(deployer.getName(), stackPolicy.getStackName(), action,
                     result.decision(), "SYSTEM", null);
@@ -158,9 +159,9 @@ public class ApprovalCheckService {
         return sha == null || sha.isBlank() ? "" : " for commit " + sha;
     }
 
-    private ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy) {
+    private ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy, String action) {
         return approvalPolicyResolver.resolve(stackPolicy.getApprovalLevel())
-                .map((ApprovalPolicy policy) -> policy.evaluate(deployer, stackPolicy))
+                .map((ApprovalPolicy policy) -> policy.evaluate(deployer, stackPolicy, action))
                 .orElseGet(() -> ApprovalResult.denied(
                         "no approval policy registered for level: " + stackPolicy.getApprovalLevel()));
     }

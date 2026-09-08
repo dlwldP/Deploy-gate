@@ -25,7 +25,7 @@ class SingleApproverPolicyTest {
                 .approvalLevel(ApprovalLevel.SINGLE_APPROVER)
                 .build();
 
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, "DEPLOY");
 
         assertThat(result.decision()).isEqualTo(Decision.PENDING);
     }
@@ -42,7 +42,7 @@ class SingleApproverPolicyTest {
                 .approvalLevel(ApprovalLevel.SINGLE_APPROVER)
                 .build();
 
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, "DEPLOY");
 
         assertThat(result.decision()).isEqualTo(Decision.DENIED);
     }

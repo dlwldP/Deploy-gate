@@ -19,8 +19,17 @@ public abstract class ApprovalPolicy {
     /** Distinct approvers this level demands. Zero means the deploy needs no sign-off. */
     public abstract int requiredApprovals();
 
-    public ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy) {
-        String requiredClaim = stackPolicy.getRequiredClaim();
+    /**
+     * The action is part of the question, not decoration: a stack may gate destroying
+     * on a different claim than deploying, and a stack that was never configured for an
+     * action must not answer for it.
+     */
+    public ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy, String action) {
+        if (!stackPolicy.allowsAction(action)) {
+            return ApprovalResult.denied("stack " + stackPolicy.getStackName()
+                    + " does not allow action: " + action);
+        }
+        String requiredClaim = stackPolicy.requiredClaimFor(action);
         if (!deployer.getClaims().contains(requiredClaim)) {
             return ApprovalResult.denied("deployer is missing required claim: " + requiredClaim);
         }

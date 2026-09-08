@@ -25,7 +25,7 @@ class NoApprovalPolicyTest {
                 .approvalLevel(ApprovalLevel.NONE)
                 .build();
 
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, "DEPLOY");
 
         assertThat(result.decision()).isEqualTo(Decision.ALLOWED);
     }
@@ -42,7 +42,7 @@ class NoApprovalPolicyTest {
                 .approvalLevel(ApprovalLevel.NONE)
                 .build();
 
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, "DEPLOY");
 
         assertThat(result.decision()).isEqualTo(Decision.DENIED);
     }

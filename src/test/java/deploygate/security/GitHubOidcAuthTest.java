@@ -126,7 +126,7 @@ class GitHubOidcAuthTest {
     @Test
     void oidcCallerCannotClaimADifferentCommit() throws Exception {
         ResponseEntity<String> response = post("/approval/request", validToken("jiye", "attested1"),
-                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", "DEPLOY_OIDC", "someothersha"),
+                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", "DEPLOY", "someothersha"),
                 String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
@@ -136,7 +136,7 @@ class GitHubOidcAuthTest {
     void attestedCommitIsUsedWhenTheBodyOmitsIt() throws Exception {
         // ProdAlbStack requires a commit sha; the token supplies it, so this succeeds.
         ResponseEntity<ApprovalCheckResponse> response = post("/approval/check", validToken("jiye", "attested2"),
-                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY_ATTESTED"), ApprovalCheckResponse.class);
+                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY"), ApprovalCheckResponse.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(response.getBody().result()).isEqualTo("PENDING");
@@ -145,7 +145,7 @@ class GitHubOidcAuthTest {
     @Test
     void oidcCallerCannotCastAnApprovalVote() throws Exception {
         ResponseEntity<ApprovalRequestResponse> requested = post("/approval/request", validToken("jiye", "vote1234"),
-                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", "DEPLOY_OIDC_VOTE"),
+                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", "DEPLOY"),
                 ApprovalRequestResponse.class);
         assertThat(requested.getStatusCode()).isEqualTo(HttpStatus.OK);
 

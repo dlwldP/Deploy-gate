@@ -36,6 +36,7 @@ cdk deploy 계속 진행   실패 처리   승인권자 승인 후 재요청 →
 ```
 deployer         id, name, claims(예: "stack:SmallAppStack:deploy", "stack:ProdAlbStack:approve")
 stack_policy     stack_name, required_claim, approval_level(NONE / SINGLE_APPROVER / DUAL_APPROVER),
+                 allowed_actions, approver_claim,
                  approval_ttl_minutes, single_use, require_commit_sha
 approval_request deployer_id, stack_name, action, commit_sha,
                  status(PENDING/APPROVED/REJECTED/CONSUMED),
@@ -56,6 +57,20 @@ approval_log     감사 로그 — 모든 결정 시점(즉시 승인/거부, �
 | `approval_ttl_minutes` | 승인 후 이 시간이 지나면 만료 (기본 60분) |
 | `single_use` | 승인이 배포 1회를 인가하고 소진(`CONSUMED`). 재사용(replay) 시 거부 |
 | `approver_claim` | 이 스택을 승인할 수 있는 claim. 미설정 시 `stack:{stack}:approve` 관례를 따름 |
+| `allowed_actions` | 이 스택이 응답하는 action 목록(기본 `DEPLOY`). 목록에 없으면 거부 |
+
+### action이 권한을 가른다
+
+`required_claim`에 `{action}` 자리표시자를 쓰면 **작업별로 다른 claim**을 요구합니다.
+
+```
+required_claim = "stack:SmallAppStack:{action}"
+  DEPLOY  → stack:SmallAppStack:deploy 필요
+  DESTROY → stack:SmallAppStack:destroy 필요
+```
+
+자리표시자가 없으면 종전처럼 스택 단위의 claim 하나로 모든 action을 통과시킵니다.
+action은 대문자로 정규화되므로 `deploy`와 `DEPLOY`가 별개 승인 트랙으로 갈리지 않습니다.
 
 `single_use`가 꺼진 스택은 TTL·커밋 범위 안에서 재시도가 가능해, 파이프라인 재실행이 깨지지 않습니다.
 데모 시더 기준 `ProdAlbStack`은 세 옵션을 모두 켠 가장 엄격한 설정입니다.
@@ -166,4 +181,6 @@ deploy-gate/
 - **Deployer/토큰 프로비저닝 API** — 현재 데모 시더 외에는 deployer 생성·토큰 발급 경로가 없음. 실사용 온보딩을 위해 `POST /admin/deployers` + 토큰 재발급/회수 엔드포인트 필요
 - **본인 이력 셀프 조회** — `admin:read` 없이는 자기 승인 이력도 못 봄. 개인 토큰으로 자기 이름 필터 조회 정도는 허용해도 안전
 - **감사 로그 export(CSV/JSON)** — 컴플라이언스·사후 감사용
-- (리팩토링) `ApprovalCheckService`/`ApprovalRequestService`의 중복된 평가 로직을 `ApprovalRequest` 도메인 메서드로 정리
+- **승인 사유 기록** — 지금은 "누가 승인했는지"만 남고 "왜"는 안 남음. approve/reject에 코멘트 필드 추가
+- **토큰 수명주기** — 회전·폐기, 퇴사자 비활성화(`enabled` 플래그) 개념이 아직 없음
+- **관측성** — 승인 대기 건수 gauge, 승인까지 걸린 시간 timer 등 비즈니스 메트릭

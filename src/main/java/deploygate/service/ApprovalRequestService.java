@@ -69,7 +69,8 @@ public class ApprovalRequestService {
         return createRequest(user, stack, action, null);
     }
 
-    public ApprovalRequestResponse createRequest(String user, String stack, String action, String commitSha) {
+    public ApprovalRequestResponse createRequest(String user, String stack, String rawAction, String commitSha) {
+        String action = DeployAction.normalize(rawAction);
         Deployer deployer = deployerRepository.findByName(user)
                 .orElseThrow(() -> new DeployerNotFoundException("unknown deployer: " + user));
         StackPolicy stackPolicy = stackPolicyRepository.findByStackName(stack)
@@ -77,6 +78,11 @@ public class ApprovalRequestService {
 
         if (stackPolicy.getApprovalLevel() == ApprovalLevel.NONE) {
             throw new InvalidRequestStateException("stack does not require approval: " + stack);
+        }
+
+        if (!stackPolicy.allowsAction(action)) {
+            throw new InvalidRequestStateException(
+                    "stack " + stack + " does not allow action: " + action);
         }
 
         String sha = CommitSha.normalize(commitSha);
@@ -100,7 +106,7 @@ public class ApprovalRequestService {
         ApprovalPolicy policy = approvalPolicyResolver.resolve(stackPolicy.getApprovalLevel())
                 .orElseThrow(() -> new InvalidRequestStateException(
                         "no approval policy registered for level: " + stackPolicy.getApprovalLevel()));
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, action);
 
         if (result.decision() == Decision.DENIED) {
             approvalLogService.record(user, stack, action, Decision.DENIED, "SYSTEM", null);

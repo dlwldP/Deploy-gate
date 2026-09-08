@@ -75,10 +75,13 @@ public class DemoDataSeeder implements CommandLineRunner {
                 .apiTokenHash(ApiTokens.hash(BOB_TOKEN))
                 .build());
 
+        // Gates each operation on its own claim: deploying here does not imply the right
+        // to destroy. jiye holds both, a deployer with only :deploy would be refused.
         stackPolicyRepository.save(StackPolicy.builder()
                 .stackName("SmallAppStack")
-                .requiredClaim("stack:SmallAppStack:deploy")
+                .requiredClaim("stack:SmallAppStack:{action}")
                 .approvalLevel(ApprovalLevel.NONE)
+                .allowedActions("DEPLOY,DESTROY")
                 .build());
 
         stackPolicyRepository.save(StackPolicy.builder()
