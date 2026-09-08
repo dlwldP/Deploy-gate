@@ -24,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ApprovalControllerTest {
 
     private static final String CI_TOKEN = "test-ci-service-token";
+    private static final String DUAL_SHA = "9f1c2ab";
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -53,6 +54,18 @@ class ApprovalControllerTest {
                 new ApprovalRequestCreateRequest("jiye", stack, action), ApprovalRequestResponse.class).getBody();
     }
 
+    /** ProdAlbStack is seeded with requireCommitSha, so its requests must name a commit. */
+    private ApprovalRequestResponse createProdRequest(String action, String commitSha) {
+        return post("/approval/request", CI_TOKEN,
+                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", action, commitSha),
+                ApprovalRequestResponse.class).getBody();
+    }
+
+    private ResponseEntity<ApprovalCheckResponse> checkProd(String action, String commitSha) {
+        return post("/approval/check", CI_TOKEN,
+                new ApprovalCheckRequest("jiye", "ProdAlbStack", action, commitSha), ApprovalCheckResponse.class);
+    }
+
     // --- authentication / authorization ---------------------------------------
 
     @Test
@@ -73,7 +86,7 @@ class ApprovalControllerTest {
 
     @Test
     void ciServiceTokenCannotCastApprovalVote() {
-        ApprovalRequestResponse created = createRequest("ProdAlbStack", "DEPLOY_CI_VOTE");
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_CI_VOTE", "aaa1111");
 
         ResponseEntity<String> response = postNoBody("/approval/" + created.id() + "/approve", CI_TOKEN, String.class);
 
@@ -91,7 +104,7 @@ class ApprovalControllerTest {
     @Test
     void deployerCannotApproveTheirOwnRequest() {
         // jiye holds ProdAlbStack:deploy but must not be able to wave through their own deploy.
-        ApprovalRequestResponse created = createRequest("ProdAlbStack", "DEPLOY_SELF");
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_SELF", "bbb2222");
 
         ResponseEntity<String> response =
                 postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.JIYE_TOKEN, String.class);
@@ -120,8 +133,7 @@ class ApprovalControllerTest {
 
     @Test
     void checkReturnsPendingWhenApprovalRequired() {
-        ResponseEntity<ApprovalCheckResponse> response = post("/approval/check", CI_TOKEN,
-                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY"), ApprovalCheckResponse.class);
+        ResponseEntity<ApprovalCheckResponse> response = checkProd("DEPLOY", "ccc3333");
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(response.getBody().result()).isEqualTo("PENDING");
@@ -161,41 +173,38 @@ class ApprovalControllerTest {
 
     @Test
     void dualApprover_staysPendingAfterOneOfTwoApprovals() {
-        ApprovalRequestResponse created = createRequest("ProdAlbStack", "DEPLOY_D1");
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_D1", DUAL_SHA);
 
         ResponseEntity<ApprovalActionResponse> firstApproval =
                 postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
         assertThat(firstApproval.getBody().status()).isEqualTo("PENDING");
 
-        ResponseEntity<ApprovalCheckResponse> recheck = post("/approval/check", CI_TOKEN,
-                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY_D1"), ApprovalCheckResponse.class);
+        ResponseEntity<ApprovalCheckResponse> recheck = checkProd("DEPLOY_D1", DUAL_SHA);
         assertThat(recheck.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
 
         ResponseEntity<ApprovalActionResponse> secondApproval =
                 postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.BOB_TOKEN, ApprovalActionResponse.class);
         assertThat(secondApproval.getBody().status()).isEqualTo("APPROVED");
 
-        ResponseEntity<ApprovalCheckResponse> finalCheck = post("/approval/check", CI_TOKEN,
-                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY_D1"), ApprovalCheckResponse.class);
+        ResponseEntity<ApprovalCheckResponse> finalCheck = checkProd("DEPLOY_D1", DUAL_SHA);
         assertThat(finalCheck.getStatusCode()).isEqualTo(HttpStatus.OK);
     }
 
     @Test
     void reject_immediatelyDeniesRecheck() {
-        ApprovalRequestResponse created = createRequest("ProdAlbStack", "DEPLOY_D2");
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_D2", "ddd4444");
 
         ResponseEntity<ApprovalActionResponse> rejectResponse =
                 postNoBody("/approval/" + created.id() + "/reject", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
         assertThat(rejectResponse.getBody().status()).isEqualTo("REJECTED");
 
-        ResponseEntity<ApprovalCheckResponse> recheck = post("/approval/check", CI_TOKEN,
-                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY_D2"), ApprovalCheckResponse.class);
+        ResponseEntity<ApprovalCheckResponse> recheck = checkProd("DEPLOY_D2", "ddd4444");
         assertThat(recheck.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     void approve_duplicateVoteReturns409() {
-        ApprovalRequestResponse created = createRequest("ProdAlbStack", "DEPLOY_D3");
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_D3", "eee5555");
 
         postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
         ResponseEntity<String> duplicate =
@@ -220,6 +229,67 @@ class ApprovalControllerTest {
                 postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.BOB_TOKEN, String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // --- approval scope: commit binding, single use, replay ---------------------
+
+    @Test
+    void prodCheckWithoutCommitShaIsDenied() {
+        // ProdAlbStack is seeded with requireCommitSha, so an unscoped check must fail closed.
+        ResponseEntity<ApprovalCheckResponse> response = post("/approval/check", CI_TOKEN,
+                new ApprovalCheckRequest("jiye", "ProdAlbStack", "DEPLOY_NOSHA"), ApprovalCheckResponse.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody().reason()).contains("commitSha");
+    }
+
+    @Test
+    void prodRequestWithoutCommitShaIsRejected() {
+        ResponseEntity<String> response = post("/approval/request", CI_TOKEN,
+                new ApprovalRequestCreateRequest("jiye", "ProdAlbStack", "DEPLOY_NOSHA2"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void singleUseApprovalIsSpentByTheDeployItAuthorises() {
+        String sha = "1a2b3c4";
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_ONCE", sha);
+        postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
+        postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.BOB_TOKEN, ApprovalActionResponse.class);
+
+        assertThat(checkProd("DEPLOY_ONCE", sha).getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        // The approval authorised one deploy; replaying it must not authorise a second.
+        ResponseEntity<ApprovalCheckResponse> replay = checkProd("DEPLOY_ONCE", sha);
+        assertThat(replay.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(replay.getBody().reason()).contains("already spent");
+    }
+
+    @Test
+    void approvalDoesNotCarryOverToADifferentCommit() {
+        ApprovalRequestResponse created = createProdRequest("DEPLOY_SHA_SCOPE", "cafe111");
+        postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
+        postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.BOB_TOKEN, ApprovalActionResponse.class);
+
+        // Same stack, same action, approved — but a different commit needs its own approval.
+        ResponseEntity<ApprovalCheckResponse> otherCommit = checkProd("DEPLOY_SHA_SCOPE", "beef222");
+
+        assertThat(otherCommit.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
+        assertThat(otherCommit.getBody().result()).isEqualTo("PENDING");
+    }
+
+    @Test
+    void nonSingleUseApprovalStillAllowsPipelineRetries() {
+        // StagingApiStack is not single-use, so a retried deploy of the same approval works.
+        ApprovalRequestResponse created = createRequest("StagingApiStack", "DEPLOY_RETRY");
+        postNoBody("/approval/" + created.id() + "/approve", DemoDataSeeder.ALICE_TOKEN, ApprovalActionResponse.class);
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            ResponseEntity<ApprovalCheckResponse> recheck = post("/approval/check", CI_TOKEN,
+                    new ApprovalCheckRequest("jiye", "StagingApiStack", "DEPLOY_RETRY"), ApprovalCheckResponse.class);
+            assertThat(recheck.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
     }
 
     @Test

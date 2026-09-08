@@ -9,7 +9,9 @@
 #     then alice approves -> 200 OK
 #   - jiye -> ProdAlbStack: approvalLevel=DUAL_APPROVER -> 202 Pending,
 #     stays pending after one of two approvals, then 200 OK once both
-#     alice and bob (distinct approvers) approve
+#     alice and bob (distinct approvers) approve. This stack is also seeded
+#     with requireCommitSha + singleUse, so the request names the commit and
+#     the approval is spent by the deploy it authorises -- a replay gets 403.
 name: Deploy Example (deploy-gate integration demo)
 
 on:
@@ -112,7 +114,7 @@ jobs:
         run: |
           STATUS=$(curl -s -o response.json -w '%{http_code}' -X POST http://localhost:8080/approval/check \
             -H 'Content-Type: application/json' -H "Authorization: Bearer $CI_TOKEN" \
-            -d '{"user":"jiye","stack":"ProdAlbStack","action":"DEPLOY"}')
+            -d "{\"user\":\"jiye\",\"stack\":\"ProdAlbStack\",\"action\":\"DEPLOY\",\"commitSha\":\"$GITHUB_SHA\"}")
           echo "check response: $(cat response.json)"
           if [ "$STATUS" != "202" ]; then
             echo "expected 202 Pending for ProdAlbStack but got $STATUS"
@@ -121,7 +123,7 @@ jobs:
 
           curl -s -o request.json -X POST http://localhost:8080/approval/request \
             -H 'Content-Type: application/json' -H "Authorization: Bearer $CI_TOKEN" \
-            -d '{"user":"jiye","stack":"ProdAlbStack","action":"DEPLOY"}'
+            -d "{\"user\":\"jiye\",\"stack\":\"ProdAlbStack\",\"action\":\"DEPLOY\",\"commitSha\":\"$GITHUB_SHA\"}"
           echo "request response: $(cat request.json)"
           REQUEST_ID=$(jq -r '.id' request.json)
 
@@ -135,7 +137,7 @@ jobs:
 
           STATUS=$(curl -s -o response.json -w '%{http_code}' -X POST http://localhost:8080/approval/check \
             -H 'Content-Type: application/json' -H "Authorization: Bearer $CI_TOKEN" \
-            -d '{"user":"jiye","stack":"ProdAlbStack","action":"DEPLOY"}')
+            -d "{\"user\":\"jiye\",\"stack\":\"ProdAlbStack\",\"action\":\"DEPLOY\",\"commitSha\":\"$GITHUB_SHA\"}")
           echo "recheck after 1/2 response: $(cat response.json)"
           if [ "$STATUS" != "202" ]; then
             echo "expected 202 Pending for ProdAlbStack after only one approval but got $STATUS"
@@ -152,13 +154,25 @@ jobs:
 
           STATUS=$(curl -s -o response.json -w '%{http_code}' -X POST http://localhost:8080/approval/check \
             -H 'Content-Type: application/json' -H "Authorization: Bearer $CI_TOKEN" \
-            -d '{"user":"jiye","stack":"ProdAlbStack","action":"DEPLOY"}')
+            -d "{\"user\":\"jiye\",\"stack\":\"ProdAlbStack\",\"action\":\"DEPLOY\",\"commitSha\":\"$GITHUB_SHA\"}")
           echo "recheck response: $(cat response.json)"
           if [ "$STATUS" != "200" ]; then
             echo "expected 200 OK for ProdAlbStack after both approvals but got $STATUS"
             exit 1
           fi
           echo "approved -> cdk deploy ProdAlbStack (example, not actually run)"
+
+          # ProdAlbStack is single-use: the approval was spent by the deploy above,
+          # so replaying the very same approval must now be refused.
+          STATUS=$(curl -s -o response.json -w '%{http_code}' -X POST http://localhost:8080/approval/check \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer $CI_TOKEN" \
+            -d "{\"user\":\"jiye\",\"stack\":\"ProdAlbStack\",\"action\":\"DEPLOY\",\"commitSha\":\"$GITHUB_SHA\"}")
+          echo "replay response: $(cat response.json)"
+          if [ "$STATUS" != "403" ]; then
+            echo "expected a spent single-use approval to be refused, but got $STATUS"
+            exit 1
+          fi
+          echo "spent approval correctly refused on replay"
 
       - name: Show approval history
         if: always()

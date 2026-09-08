@@ -35,12 +35,29 @@ cdk deploy 계속 진행   실패 처리   승인권자 승인 후 재요청 →
 
 ```
 deployer         id, name, claims(예: "stack:SmallAppStack:deploy", "stack:ProdAlbStack:approve")
-stack_policy     stack_name, required_claim, approval_level(NONE / SINGLE_APPROVER / DUAL_APPROVER)
-approval_request deployer_id, stack_name, action, status(PENDING/APPROVED/REJECTED),
-                 required_approvals(생성 시점 스냅샷), created_at, decided_at
+stack_policy     stack_name, required_claim, approval_level(NONE / SINGLE_APPROVER / DUAL_APPROVER),
+                 approval_ttl_minutes, single_use, require_commit_sha
+approval_request deployer_id, stack_name, action, commit_sha,
+                 status(PENDING/APPROVED/REJECTED/CONSUMED),
+                 required_approvals(생성 시점 스냅샷), created_at, decided_at, expires_at
 approval_vote    request_id, approver_id, decision(APPROVE/REJECT)  -- (request_id, approver_id) 유니크
 approval_log     감사 로그 — 모든 결정 시점(즉시 승인/거부, 요청 생성, 투표, 최종 결정)에 기록
 ```
+
+### 승인의 수명
+
+승인은 **한 번 받으면 영원한 통행증이 아닙니다.** 그렇지 않으면 운영 스택 승인을 한 번 받은 뒤
+전혀 다른 코드를 무제한으로 배포할 수 있습니다. 세 가지로 범위를 좁힙니다.
+
+| 정책 옵션 | 의미 |
+|---|---|
+| `require_commit_sha` | check/request가 배포 대상 커밋을 명시해야 함. 없으면 거부(fail-closed) |
+| `commit_sha` 바인딩 | 승인은 **그 커밋에만** 유효. 다른 커밋은 자기 승인을 새로 받아야 함 |
+| `approval_ttl_minutes` | 승인 후 이 시간이 지나면 만료 (기본 60분) |
+| `single_use` | 승인이 배포 1회를 인가하고 소진(`CONSUMED`). 재사용(replay) 시 거부 |
+
+`single_use`가 꺼진 스택은 TTL·커밋 범위 안에서 재시도가 가능해, 파이프라인 재실행이 깨지지 않습니다.
+데모 시더 기준 `ProdAlbStack`은 세 옵션을 모두 켠 가장 엄격한 설정입니다.
 
 승인권자는 별도 개념이 아니라 `"stack:{stack}:approve"` claim을 가진 `Deployer`입니다. 승인 절차는 `ApprovalLevel`에 따라 다형성으로 분기합니다:
 
@@ -61,8 +78,8 @@ public abstract class ApprovalPolicy {
 
 | 엔드포인트 | 설명 | 필요 권한 |
 |---|---|---|
-| `POST /approval/check` | 즉시 판단 필요 시 호출 (CI 파이프라인용) | CI 서비스 토큰 또는 본인 토큰 |
-| `POST /approval/request` | 승인 필요 스택은 거부 대신 승인 대기 요청 생성 | CI 서비스 토큰 또는 본인 토큰 |
+| `POST /approval/check` | 즉시 판단 필요 시 호출 (CI 파이프라인용). 본문에 `commitSha` 선택 | CI 서비스 토큰 또는 본인 토큰 |
+| `POST /approval/request` | 승인 필요 스택은 거부 대신 승인 대기 요청 생성. 본문에 `commitSha` 선택 | CI 서비스 토큰 또는 본인 토큰 |
 | `POST /approval/{id}/approve` | 대기 중인 요청 승인 | **개인 토큰만** + `stack:{stack}:approve` |
 | `POST /approval/{id}/reject` | 대기 중인 요청 거부 | **개인 토큰만** + `stack:{stack}:approve` |
 | `GET /approval/history` | 감사 로그 조회 | `admin:read` |

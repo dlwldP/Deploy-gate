@@ -36,6 +36,13 @@ public class ApprovalRequest {
     @Column(nullable = false)
     private String action;
 
+    /**
+     * The commit the approvers were looking at, when the caller supplied one. An
+     * approval is only honoured for this exact commit — otherwise a single approval
+     * would keep authorising every later push to the same stack.
+     */
+    private String commitSha;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ApprovalRequestStatus status;
@@ -48,13 +55,40 @@ public class ApprovalRequest {
 
     private Instant decidedAt;
 
-    public void approve(Instant now) {
+    /** When the granted approval stops being honoured. Set at approval time. */
+    private Instant expiresAt;
+
+    private Instant consumedAt;
+
+    public void approve(Instant now, Instant expiresAt) {
         this.status = ApprovalRequestStatus.APPROVED;
         this.decidedAt = now;
+        this.expiresAt = expiresAt;
     }
 
     public void reject(Instant now) {
         this.status = ApprovalRequestStatus.REJECTED;
         this.decidedAt = now;
+    }
+
+    /** Spends a granted approval so it cannot authorise a second deploy. */
+    public void consume(Instant now) {
+        this.status = ApprovalRequestStatus.CONSUMED;
+        this.consumedAt = now;
+    }
+
+    public boolean isExpiredAt(Instant now) {
+        return expiresAt != null && !now.isBefore(expiresAt);
+    }
+
+    /**
+     * An approval bound to a commit only covers that commit; an unbound approval
+     * covers any commit, which is why {@code requireCommitSha} exists on the policy.
+     */
+    public boolean coversCommit(String candidateSha) {
+        if (commitSha == null || commitSha.isBlank()) {
+            return true;
+        }
+        return commitSha.equalsIgnoreCase(candidateSha == null ? null : candidateSha.trim());
     }
 }

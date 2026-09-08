@@ -32,6 +32,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -65,6 +66,10 @@ public class ApprovalRequestService {
     }
 
     public ApprovalRequestResponse createRequest(String user, String stack, String action) {
+        return createRequest(user, stack, action, null);
+    }
+
+    public ApprovalRequestResponse createRequest(String user, String stack, String action, String commitSha) {
         Deployer deployer = deployerRepository.findByName(user)
                 .orElseThrow(() -> new DeployerNotFoundException("unknown deployer: " + user));
         StackPolicy stackPolicy = stackPolicyRepository.findByStackName(stack)
@@ -74,8 +79,19 @@ public class ApprovalRequestService {
             throw new InvalidRequestStateException("stack does not require approval: " + stack);
         }
 
-        ApprovalRequest existing = approvalRequestRepository
-                .findByDeployerIdAndStackNameAndActionAndStatus(deployer.getId(), stack, action, ApprovalRequestStatus.PENDING)
+        String sha = CommitSha.normalize(commitSha);
+        if (stackPolicy.isRequireCommitSha() && sha == null) {
+            throw new InvalidRequestStateException(
+                    "stack " + stack + " requires the deployed commitSha to be supplied");
+        }
+
+        // Idempotent per commit: a retried pipeline step must not open a second request,
+        // but a genuinely different commit needs its own approval.
+        ApprovalRequest existing = (sha == null
+                ? approvalRequestRepository.findByDeployerIdAndStackNameAndActionAndStatus(
+                        deployer.getId(), stack, action, ApprovalRequestStatus.PENDING)
+                : approvalRequestRepository.findByDeployerIdAndStackNameAndActionAndCommitShaAndStatus(
+                        deployer.getId(), stack, action, sha, ApprovalRequestStatus.PENDING))
                 .orElse(null);
         if (existing != null) {
             return toResponse(existing, "existing pending request");
@@ -96,6 +112,7 @@ public class ApprovalRequestService {
                 .deployerId(deployer.getId())
                 .stackName(stack)
                 .action(action)
+                .commitSha(sha)
                 .status(ApprovalRequestStatus.PENDING)
                 .requiredApprovals(requiredApprovals)
                 .createdAt(Instant.now())
@@ -124,11 +141,14 @@ public class ApprovalRequestService {
         Deployer requester = deployerRepository.findById(request.getDeployerId()).orElseThrow();
 
         if (approvals >= request.getRequiredApprovals()) {
-            request.approve(Instant.now());
+            Instant now = Instant.now();
+            Instant expiresAt = now.plus(approvalTtl(request.getStackName()));
+            request.approve(now, expiresAt);
             approvalRequestRepository.save(request);
             approvalLogService.record(requester.getName(), request.getStackName(), request.getAction(),
                     Decision.ALLOWED, approverName, requestId);
-            return new ApprovalActionResponse(requestId, request.getStatus().name(), "fully approved");
+            return new ApprovalActionResponse(requestId, request.getStatus().name(),
+                    "fully approved; valid until " + expiresAt);
         }
 
         approvalLogService.record(requester.getName(), request.getStackName(), request.getAction(),
@@ -180,6 +200,14 @@ public class ApprovalRequestService {
                 .map(log -> new ApprovalHistoryEntry(log.getId(), log.getDeployerName(), log.getStackName(),
                         log.getAction(), log.getResult().name(), log.getDecidedBy(), log.getDecidedAt()))
                 .toList();
+    }
+
+    /** Falls back to the default when the stack policy is gone, so an approval is never open-ended. */
+    private Duration approvalTtl(String stackName) {
+        int minutes = stackPolicyRepository.findByStackName(stackName)
+                .map(StackPolicy::approvalTtlMinutesOrDefault)
+                .orElse(StackPolicy.DEFAULT_APPROVAL_TTL_MINUTES);
+        return Duration.ofMinutes(minutes);
     }
 
     private ApprovalRequest requireVotableRequest(Long requestId) {

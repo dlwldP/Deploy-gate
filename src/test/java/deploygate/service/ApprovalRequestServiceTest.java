@@ -173,7 +173,7 @@ class ApprovalRequestServiceTest {
     @Test
     void approve_nonPendingRequest_throwsInvalidRequestState() {
         ApprovalRequest request = pendingDualRequest();
-        request.approve(Instant.now());
+        request.approve(Instant.now(), Instant.now().plusSeconds(3600));
         when(approvalRequestRepository.findById(10L)).thenReturn(Optional.of(request));
 
         assertThatThrownBy(() -> service.approve(10L, "alice"))

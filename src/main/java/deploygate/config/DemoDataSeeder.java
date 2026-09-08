@@ -85,12 +85,18 @@ public class DemoDataSeeder implements CommandLineRunner {
                 .stackName("StagingApiStack")
                 .requiredClaim("stack:StagingApiStack:deploy")
                 .approvalLevel(ApprovalLevel.SINGLE_APPROVER)
+                .approvalTtlMinutes(120)
                 .build());
 
+        // The production stack is the strict one: approval covers exactly one commit
+        // and is spent by the deploy it authorises.
         stackPolicyRepository.save(StackPolicy.builder()
                 .stackName("ProdAlbStack")
                 .requiredClaim("stack:ProdAlbStack:deploy")
                 .approvalLevel(ApprovalLevel.DUAL_APPROVER)
+                .approvalTtlMinutes(30)
+                .requireCommitSha(true)
+                .singleUse(true)
                 .build());
     }
 }

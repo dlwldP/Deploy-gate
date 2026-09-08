@@ -32,4 +32,29 @@ public class StackPolicy {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ApprovalLevel approvalLevel;
+
+    /** How long a granted approval stays valid. Null falls back to {@link #DEFAULT_APPROVAL_TTL_MINUTES}. */
+    private Integer approvalTtlMinutes;
+
+    /** When true, an approval authorises exactly one deploy and is spent on use. */
+    private Boolean singleUse;
+
+    /** When true, check/request must name the commit being deployed. */
+    private Boolean requireCommitSha;
+
+    public static final int DEFAULT_APPROVAL_TTL_MINUTES = 60;
+
+    public int approvalTtlMinutesOrDefault() {
+        return approvalTtlMinutes != null && approvalTtlMinutes > 0
+                ? approvalTtlMinutes
+                : DEFAULT_APPROVAL_TTL_MINUTES;
+    }
+
+    public boolean isSingleUse() {
+        return Boolean.TRUE.equals(singleUse);
+    }
+
+    public boolean isRequireCommitSha() {
+        return Boolean.TRUE.equals(requireCommitSha);
+    }
 }

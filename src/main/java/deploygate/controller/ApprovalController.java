@@ -43,7 +43,7 @@ public class ApprovalController {
     public ResponseEntity<ApprovalCheckResponse> check(@Valid @RequestBody ApprovalCheckRequest request,
                                                        @AuthenticationPrincipal AuthenticatedCaller caller) {
         String user = resolveSubject(caller, request.user());
-        ApprovalResult result = approvalCheckService.check(user, request.stack(), request.action());
+        ApprovalResult result = approvalCheckService.check(user, request.stack(), request.action(), request.commitSha());
         HttpStatus status = switch (result.decision()) {
             case ALLOWED -> HttpStatus.OK;
             case PENDING -> HttpStatus.ACCEPTED;
@@ -57,7 +57,8 @@ public class ApprovalController {
     public ResponseEntity<ApprovalRequestResponse> request(@Valid @RequestBody ApprovalRequestCreateRequest request,
                                                            @AuthenticationPrincipal AuthenticatedCaller caller) {
         String user = resolveSubject(caller, request.user());
-        return ResponseEntity.ok(approvalRequestService.createRequest(user, request.stack(), request.action()));
+        return ResponseEntity.ok(
+                approvalRequestService.createRequest(user, request.stack(), request.action(), request.commitSha()));
     }
 
     /**
