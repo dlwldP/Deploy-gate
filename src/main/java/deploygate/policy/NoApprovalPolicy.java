@@ -1,10 +1,9 @@
 package deploygate.policy;
 
 import deploygate.entity.ApprovalLevel;
-import deploygate.entity.Deployer;
-import deploygate.entity.StackPolicy;
 import org.springframework.stereotype.Component;
 
+/** Low-risk stacks: holding the claim is the whole gate. */
 @Component
 public class NoApprovalPolicy extends ApprovalPolicy {
 
@@ -14,11 +13,7 @@ public class NoApprovalPolicy extends ApprovalPolicy {
     }
 
     @Override
-    public ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy) {
-        String requiredClaim = stackPolicy.getRequiredClaim();
-        if (deployer.getClaims().contains(requiredClaim)) {
-            return ApprovalResult.allowed("deployer has required claim: " + requiredClaim);
-        }
-        return ApprovalResult.denied("deployer is missing required claim: " + requiredClaim);
+    public int requiredApprovals() {
+        return 0;
     }
 }

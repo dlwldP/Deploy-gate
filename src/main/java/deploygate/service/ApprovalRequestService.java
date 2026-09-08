@@ -107,7 +107,9 @@ public class ApprovalRequestService {
             throw new DeployerNotAuthorizedException(result.reason());
         }
 
-        int requiredApprovals = stackPolicy.getApprovalLevel() == ApprovalLevel.SINGLE_APPROVER ? 1 : 2;
+        // The count belongs to the policy, not to a branch here: a new approval level
+        // must not be able to silently inherit someone else's threshold.
+        int requiredApprovals = policy.requiredApprovals();
         ApprovalRequest request = approvalRequestRepository.save(ApprovalRequest.builder()
                 .deployerId(deployer.getId())
                 .stackName(stack)

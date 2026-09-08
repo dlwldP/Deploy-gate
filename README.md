@@ -63,13 +63,17 @@ approval_log     감사 로그 — 모든 결정 시점(즉시 승인/거부, �
 
 ```java
 public abstract class ApprovalPolicy {
-    public abstract ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy);
+    public abstract ApprovalLevel getSupportedLevel();
+    public abstract int requiredApprovals();   // 0 / 1 / 2
+    // claim 확인 → 즉시 승인 / 거부 / 승인대기 판단은 상위 클래스가 공통 처리
 }
-// NoApprovalPolicy      claim만 있으면 즉시 승인
-// SingleApproverPolicy  claim 확인 후 승인권자 1인 필요 (pending)
-// DualApproverPolicy    claim 확인 후 승인권자 2인 필요 (pending, 운영 스택)
+// NoApprovalPolicy      NONE            0인 — claim만 있으면 즉시 승인
+// SingleApproverPolicy  SINGLE_APPROVER 1인
+// DualApproverPolicy    DUAL_APPROVER   2인 (운영 스택)
 ```
 
+승인 인원수는 정책 자신이 선언합니다. 서비스가 `level == SINGLE ? 1 : 2` 같은 분기를 들고 있으면
+새 레벨이 조용히 남의 정족수를 물려받게 되므로, 레벨 추가가 정책 클래스 하나로 끝나도록 했습니다.
 정책은 "즉시 승인/거부/승인대기"만 판단하는 순수 함수이고, 요청 생성·투표 집계·상태 전이는 `ApprovalRequestService`가 담당합니다.
 
 ## API

@@ -1,10 +1,9 @@
 package deploygate.policy;
 
 import deploygate.entity.ApprovalLevel;
-import deploygate.entity.Deployer;
-import deploygate.entity.StackPolicy;
 import org.springframework.stereotype.Component;
 
+/** Production stacks: two distinct people have to sign off. */
 @Component
 public class DualApproverPolicy extends ApprovalPolicy {
 
@@ -14,11 +13,7 @@ public class DualApproverPolicy extends ApprovalPolicy {
     }
 
     @Override
-    public ApprovalResult evaluate(Deployer deployer, StackPolicy stackPolicy) {
-        String requiredClaim = stackPolicy.getRequiredClaim();
-        if (!deployer.getClaims().contains(requiredClaim)) {
-            return ApprovalResult.denied("deployer is missing required claim: " + requiredClaim);
-        }
-        return ApprovalResult.pending("requires 2 distinct approvers");
+    public int requiredApprovals() {
+        return 2;
     }
 }
