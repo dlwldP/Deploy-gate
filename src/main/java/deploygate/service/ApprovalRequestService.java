@@ -32,6 +32,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -65,6 +66,11 @@ public class ApprovalRequestService {
     }
 
     public ApprovalRequestResponse createRequest(String user, String stack, String action) {
+        return createRequest(user, stack, action, null);
+    }
+
+    public ApprovalRequestResponse createRequest(String user, String stack, String rawAction, String commitSha) {
+        String action = DeployAction.normalize(rawAction);
         Deployer deployer = deployerRepository.findByName(user)
                 .orElseThrow(() -> new DeployerNotFoundException("unknown deployer: " + user));
         StackPolicy stackPolicy = stackPolicyRepository.findByStackName(stack)
@@ -74,8 +80,24 @@ public class ApprovalRequestService {
             throw new InvalidRequestStateException("stack does not require approval: " + stack);
         }
 
-        ApprovalRequest existing = approvalRequestRepository
-                .findByDeployerIdAndStackNameAndActionAndStatus(deployer.getId(), stack, action, ApprovalRequestStatus.PENDING)
+        if (!stackPolicy.allowsAction(action)) {
+            throw new InvalidRequestStateException(
+                    "stack " + stack + " does not allow action: " + action);
+        }
+
+        String sha = CommitSha.normalize(commitSha);
+        if (stackPolicy.isRequireCommitSha() && sha == null) {
+            throw new InvalidRequestStateException(
+                    "stack " + stack + " requires the deployed commitSha to be supplied");
+        }
+
+        // Idempotent per commit: a retried pipeline step must not open a second request,
+        // but a genuinely different commit needs its own approval.
+        ApprovalRequest existing = (sha == null
+                ? approvalRequestRepository.findByDeployerIdAndStackNameAndActionAndStatus(
+                        deployer.getId(), stack, action, ApprovalRequestStatus.PENDING)
+                : approvalRequestRepository.findByDeployerIdAndStackNameAndActionAndCommitShaAndStatus(
+                        deployer.getId(), stack, action, sha, ApprovalRequestStatus.PENDING))
                 .orElse(null);
         if (existing != null) {
             return toResponse(existing, "existing pending request");
@@ -84,18 +106,21 @@ public class ApprovalRequestService {
         ApprovalPolicy policy = approvalPolicyResolver.resolve(stackPolicy.getApprovalLevel())
                 .orElseThrow(() -> new InvalidRequestStateException(
                         "no approval policy registered for level: " + stackPolicy.getApprovalLevel()));
-        ApprovalResult result = policy.evaluate(deployer, stackPolicy);
+        ApprovalResult result = policy.evaluate(deployer, stackPolicy, action);
 
         if (result.decision() == Decision.DENIED) {
             approvalLogService.record(user, stack, action, Decision.DENIED, "SYSTEM", null);
             throw new DeployerNotAuthorizedException(result.reason());
         }
 
-        int requiredApprovals = stackPolicy.getApprovalLevel() == ApprovalLevel.SINGLE_APPROVER ? 1 : 2;
+        // The count belongs to the policy, not to a branch here: a new approval level
+        // must not be able to silently inherit someone else's threshold.
+        int requiredApprovals = policy.requiredApprovals();
         ApprovalRequest request = approvalRequestRepository.save(ApprovalRequest.builder()
                 .deployerId(deployer.getId())
                 .stackName(stack)
                 .action(action)
+                .commitSha(sha)
                 .status(ApprovalRequestStatus.PENDING)
                 .requiredApprovals(requiredApprovals)
                 .createdAt(Instant.now())
@@ -113,22 +138,30 @@ public class ApprovalRequestService {
             throw new DuplicateVoteException("approver has already voted on request #" + requestId);
         }
 
+        Instant votedAt = Instant.now();
         approvalVoteRepository.save(ApprovalVote.builder()
                 .requestId(requestId)
                 .approverId(approver.getId())
                 .decision(VoteDecision.APPROVE)
-                .decidedAt(Instant.now())
+                .decidedAt(votedAt)
                 .build());
+        // Touch the request so a simultaneous second vote loses the version race and
+        // retries, instead of both voters counting a tally that misses the other.
+        request.recordVote(votedAt);
+        approvalRequestRepository.save(request);
 
         long approvals = approvalVoteRepository.countByRequestIdAndDecision(requestId, VoteDecision.APPROVE);
         Deployer requester = deployerRepository.findById(request.getDeployerId()).orElseThrow();
 
         if (approvals >= request.getRequiredApprovals()) {
-            request.approve(Instant.now());
+            Instant now = Instant.now();
+            Instant expiresAt = now.plus(approvalTtl(request.getStackName()));
+            request.approve(now, expiresAt);
             approvalRequestRepository.save(request);
             approvalLogService.record(requester.getName(), request.getStackName(), request.getAction(),
                     Decision.ALLOWED, approverName, requestId);
-            return new ApprovalActionResponse(requestId, request.getStatus().name(), "fully approved");
+            return new ApprovalActionResponse(requestId, request.getStatus().name(),
+                    "fully approved; valid until " + expiresAt);
         }
 
         approvalLogService.record(requester.getName(), request.getStackName(), request.getAction(),
@@ -145,14 +178,16 @@ public class ApprovalRequestService {
             throw new DuplicateVoteException("approver has already voted on request #" + requestId);
         }
 
+        Instant votedAt = Instant.now();
         approvalVoteRepository.save(ApprovalVote.builder()
                 .requestId(requestId)
                 .approverId(approver.getId())
                 .decision(VoteDecision.REJECT)
-                .decidedAt(Instant.now())
+                .decidedAt(votedAt)
                 .build());
 
-        request.reject(Instant.now());
+        request.recordVote(votedAt);
+        request.reject(votedAt);
         approvalRequestRepository.save(request);
 
         Deployer requester = deployerRepository.findById(request.getDeployerId()).orElseThrow();
@@ -182,6 +217,14 @@ public class ApprovalRequestService {
                 .toList();
     }
 
+    /** Falls back to the default when the stack policy is gone, so an approval is never open-ended. */
+    private Duration approvalTtl(String stackName) {
+        int minutes = stackPolicyRepository.findByStackName(stackName)
+                .map(StackPolicy::approvalTtlMinutesOrDefault)
+                .orElse(StackPolicy.DEFAULT_APPROVAL_TTL_MINUTES);
+        return Duration.ofMinutes(minutes);
+    }
+
     private ApprovalRequest requireVotableRequest(Long requestId) {
         ApprovalRequest request = approvalRequestRepository.findById(requestId)
                 .orElseThrow(() -> new ApprovalRequestNotFoundException("no approval request with id: " + requestId));
@@ -195,9 +238,18 @@ public class ApprovalRequestService {
     private Deployer requireApprover(ApprovalRequest request, String approverName) {
         Deployer approver = deployerRepository.findByName(approverName)
                 .orElseThrow(() -> new DeployerNotFoundException("unknown deployer: " + approverName));
-        String requiredClaim = "stack:" + request.getStackName() + ":approve";
+        // Which claim signs off on a stack is the policy's call, not a naming rule baked
+        // into this method: a stack owned by one team should be approvable by that team.
+        String requiredClaim = stackPolicyRepository.findByStackName(request.getStackName())
+                .map(StackPolicy::approverClaimOrDefault)
+                .orElseGet(() -> "stack:" + request.getStackName() + ":approve");
         if (!approver.getClaims().contains(requiredClaim)) {
             throw new ApproverNotAuthorizedException(approverName + " is missing required claim: " + requiredClaim);
+        }
+        // Four-eyes principle: the deploy would otherwise be self-authorized, which
+        // defeats the point of requiring an approver at all.
+        if (approver.getId().equals(request.getDeployerId())) {
+            throw new ApproverNotAuthorizedException("a deployer cannot approve or reject their own request");
         }
         return approver;
     }

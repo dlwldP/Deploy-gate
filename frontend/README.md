@@ -12,13 +12,23 @@
 
 정책이나 claim을 화면에서 수정하는 기능은 없습니다 (조회 전용).
 
+## 인증
+
+접속하려면 `admin:read` claim을 가진 deployer의 API 토큰이 필요합니다. 토큰은
+`sessionStorage`에만 저장되어 탭을 닫으면 사라지며, 모든 요청에
+`Authorization: Bearer <token>` 헤더로 전송됩니다. 서버가 401/403을 반환하면 저장된
+토큰을 지우고 로그인 화면으로 돌아갑니다.
+
+로컬 데모(`--deploygate.demo-data.enabled=true`)에서는 `dgt_demo_jiye` 또는
+`dgt_demo_alice` 토큰을 사용할 수 있습니다.
+
 ## 개발 환경 실행
 
 백엔드를 먼저 8080 포트로 띄운 뒤, 프런트엔드 dev server를 실행합니다.
 
 ```bash
-# 1) 프로젝트 루트에서 백엔드 실행
-./gradlew bootRun
+# 1) 프로젝트 루트에서 백엔드 실행 (데모 데이터 포함)
+./gradlew bootRun --args='--deploygate.demo-data.enabled=true'
 
 # 2) 별도 터미널에서 프런트엔드 실행
 cd frontend

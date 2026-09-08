@@ -1,23 +1,81 @@
-import { DeployerPanel } from './components/DeployerPanel'
-import { HistoryPanel } from './components/HistoryPanel'
-import { StackPolicyPanel } from './components/StackPolicyPanel'
+import { useCallback, useState } from 'react'
+import { tokenStore } from './auth'
+import { DeployerTable } from './components/DeployerTable'
+import { HistoryTable } from './components/HistoryTable'
+import { LoginScreen } from './components/LoginScreen'
+import { StackPolicyTable } from './components/StackPolicyTable'
+import { SummaryCards } from './components/SummaryCards'
+import { TopBar } from './components/TopBar'
+import { useDashboardData } from './useDashboardData'
 import './App.css'
 
-function App() {
-  return (
-    <div className="app">
-      <header className="app__header">
-        <h1>deploy-gate admin</h1>
-        <p>등록된 deployer, stack policy, 최근 승인/거부 이력을 조회하는 읽기 전용 화면입니다.</p>
-      </header>
+function Dashboard({ onSignOut }: { onSignOut: (notice: string | null) => void }) {
+  const handleUnauthorized = useCallback(
+    (message: string) => {
+      tokenStore.clear()
+      onSignOut(message)
+    },
+    [onSignOut],
+  )
 
-      <main className="app__grid">
-        <DeployerPanel />
-        <StackPolicyPanel />
-        <HistoryPanel />
+  const { state, reload } = useDashboardData(handleUnauthorized)
+
+  return (
+    <>
+      <TopBar
+        onReload={reload}
+        onSignOut={() => {
+          tokenStore.clear()
+          onSignOut(null)
+        }}
+        busy={state.status === 'loading'}
+      />
+
+      <main className="page">
+        {state.status === 'loading' && <p className="empty">불러오는 중…</p>}
+
+        {state.status === 'error' && (
+          <p className="alert alert--error">불러오지 못했습니다: {state.message}</p>
+        )}
+
+        {state.status === 'ready' && (
+          <>
+            <SummaryCards data={state.data} />
+            <div className="panels">
+              <DeployerTable deployers={state.data.deployers} />
+              <StackPolicyTable policies={state.data.policies} />
+              <HistoryTable entries={state.data.history} />
+            </div>
+          </>
+        )}
       </main>
-    </div>
+    </>
   )
 }
 
-export default App
+export default function App() {
+  const [token, setToken] = useState<string | null>(() => tokenStore.get())
+  const [notice, setNotice] = useState<string | null>(null)
+
+  if (token === null) {
+    return (
+      <LoginScreen
+        notice={notice}
+        onAuthenticated={(value) => {
+          tokenStore.set(value)
+          setNotice(null)
+          setToken(value)
+        }}
+      />
+    )
+  }
+
+  return (
+    <Dashboard
+      onSignOut={(message) => {
+        setNotice(message)
+        setToken(null)
+      }}
+    />
+  )
+}

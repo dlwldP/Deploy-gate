@@ -173,7 +173,7 @@ class ApprovalRequestServiceTest {
     @Test
     void approve_nonPendingRequest_throwsInvalidRequestState() {
         ApprovalRequest request = pendingDualRequest();
-        request.approve(Instant.now());
+        request.approve(Instant.now(), Instant.now().plusSeconds(3600));
         when(approvalRequestRepository.findById(10L)).thenReturn(Optional.of(request));
 
         assertThatThrownBy(() -> service.approve(10L, "alice"))
@@ -229,6 +229,42 @@ class ApprovalRequestServiceTest {
                         org.mockito.ArgumentMatchers.eq("ProdAlbStack"),
                         org.mockito.ArgumentMatchers.eq("jiye"),
                         any());
+    }
+
+    @Test
+    void approve_honoursACustomApproverClaimFromTheStackPolicy() {
+        // The stack is signed off by a team claim, not by the stack:*:approve convention.
+        StackPolicy teamOwned = StackPolicy.builder()
+                .stackName("ProdAlbStack").requiredClaim("stack:ProdAlbStack:deploy")
+                .approvalLevel(ApprovalLevel.DUAL_APPROVER)
+                .approverClaim("team:security:approve").build();
+        when(stackPolicyRepository.findByStackName("ProdAlbStack")).thenReturn(Optional.of(teamOwned));
+        ApprovalRequest request = pendingDualRequest();
+        when(approvalRequestRepository.findById(10L)).thenReturn(Optional.of(request));
+
+        // alice holds stack:ProdAlbStack:approve, which no longer counts for this stack.
+        assertThatThrownBy(() -> service.approve(10L, "alice"))
+                .isInstanceOf(ApproverNotAuthorizedException.class)
+                .hasMessageContaining("team:security:approve");
+    }
+
+    @Test
+    void approve_acceptsAnApproverHoldingTheCustomClaim() {
+        StackPolicy teamOwned = StackPolicy.builder()
+                .stackName("ProdAlbStack").requiredClaim("stack:ProdAlbStack:deploy")
+                .approvalLevel(ApprovalLevel.DUAL_APPROVER)
+                .approverClaim("team:security:approve").build();
+        when(stackPolicyRepository.findByStackName("ProdAlbStack")).thenReturn(Optional.of(teamOwned));
+        Deployer securityLead = Deployer.builder().id(4L).name("chris")
+                .claims(Set.of("team:security:approve")).build();
+        when(deployerRepository.findByName("chris")).thenReturn(Optional.of(securityLead));
+        ApprovalRequest request = pendingDualRequest();
+        when(approvalRequestRepository.findById(10L)).thenReturn(Optional.of(request));
+        when(approvalVoteRepository.countByRequestIdAndDecision(10L, VoteDecision.APPROVE)).thenReturn(1L);
+
+        ApprovalActionResponse response = service.approve(10L, "chris");
+
+        assertThat(response.status()).isEqualTo("PENDING");
     }
 
     private ApprovalRequest pendingDualRequest() {

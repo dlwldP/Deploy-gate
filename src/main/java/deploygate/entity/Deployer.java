@@ -36,4 +36,12 @@ public class Deployer {
     @Column(name = "claim", nullable = false)
     @Builder.Default
     private Set<String> claims = new HashSet<>();
+
+    /**
+     * SHA-256 hex of this deployer's API token. Null means the deployer exists as a
+     * subject of policy decisions but cannot authenticate (so cannot approve/reject).
+     * The plaintext token is never stored.
+     */
+    @Column(unique = true)
+    private String apiTokenHash;
 }
