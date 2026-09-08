@@ -32,11 +32,14 @@ public class ApiTokenAuthFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final DeployerRepository deployerRepository;
+    private final GitHubOidcAuthenticator githubOidcAuthenticator;
     private final String ciServiceToken;
 
     public ApiTokenAuthFilter(DeployerRepository deployerRepository,
+                              GitHubOidcAuthenticator githubOidcAuthenticator,
                               @Value("${deploygate.ci.token:}") String ciServiceToken) {
         this.deployerRepository = deployerRepository;
+        this.githubOidcAuthenticator = githubOidcAuthenticator;
         this.ciServiceToken = ciServiceToken;
     }
 
@@ -63,6 +66,11 @@ public class ApiTokenAuthFilter extends OncePerRequestFilter {
     }
 
     private java.util.Optional<AuthenticatedCaller> resolve(String token) {
+        // A GitHub-signed OIDC assertion proves more than either static token, so it wins.
+        java.util.Optional<AuthenticatedCaller> oidcCaller = githubOidcAuthenticator.authenticate(token);
+        if (oidcCaller.isPresent()) {
+            return oidcCaller;
+        }
         // The CI service token is configured, not stored per-deployer, so it is checked first.
         if (!ciServiceToken.isEmpty() && ApiTokens.matches(token, ciServiceToken)) {
             return java.util.Optional.of(new AuthenticatedCaller(CallerType.CI_SERVICE, "ci-service", Set.of()));

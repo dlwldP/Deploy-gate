@@ -43,7 +43,8 @@ public class ApprovalController {
     public ResponseEntity<ApprovalCheckResponse> check(@Valid @RequestBody ApprovalCheckRequest request,
                                                        @AuthenticationPrincipal AuthenticatedCaller caller) {
         String user = resolveSubject(caller, request.user());
-        ApprovalResult result = approvalCheckService.check(user, request.stack(), request.action(), request.commitSha());
+        ApprovalResult result = approvalCheckService.check(user, request.stack(), request.action(),
+                resolveCommitSha(caller, request.commitSha()));
         HttpStatus status = switch (result.decision()) {
             case ALLOWED -> HttpStatus.OK;
             case PENDING -> HttpStatus.ACCEPTED;
@@ -57,8 +58,8 @@ public class ApprovalController {
     public ResponseEntity<ApprovalRequestResponse> request(@Valid @RequestBody ApprovalRequestCreateRequest request,
                                                            @AuthenticationPrincipal AuthenticatedCaller caller) {
         String user = resolveSubject(caller, request.user());
-        return ResponseEntity.ok(
-                approvalRequestService.createRequest(user, request.stack(), request.action(), request.commitSha()));
+        return ResponseEntity.ok(approvalRequestService.createRequest(user, request.stack(), request.action(),
+                resolveCommitSha(caller, request.commitSha())));
     }
 
     /**
@@ -86,12 +87,13 @@ public class ApprovalController {
     }
 
     /**
-     * Decides whose deploy permission is being evaluated. The CI service token relays
-     * the name the pipeline authenticated on its own side; a personal token may only
-     * ever ask about itself.
+     * Decides whose deploy permission is being evaluated. Only the shared CI service
+     * token may name someone else — it is the one credential that proves no identity,
+     * so it relays the name the pipeline authenticated on its own side. A personal
+     * token or a GitHub-attested OIDC token may only ever ask about itself.
      */
     private String resolveSubject(AuthenticatedCaller caller, String requestedUser) {
-        if (!caller.isDeployer()) {
+        if (!caller.actsOnlyAsSelf()) {
             return requestedUser;
         }
         if (!caller.name().equals(requestedUser)) {
@@ -99,5 +101,22 @@ public class ApprovalController {
                     "token belongs to '" + caller.name() + "' and cannot act on behalf of '" + requestedUser + "'");
         }
         return caller.name();
+    }
+
+    /**
+     * When the credential itself attests which commit is being built, that wins: a
+     * caller must not be able to get an approval bound to a commit other than the one
+     * its own token vouches for.
+     */
+    private String resolveCommitSha(AuthenticatedCaller caller, String requestedSha) {
+        String attested = caller.attestedCommitSha();
+        if (attested == null || attested.isBlank()) {
+            return requestedSha;
+        }
+        if (requestedSha != null && !requestedSha.isBlank() && !attested.equalsIgnoreCase(requestedSha.trim())) {
+            throw new DeployerNotAuthorizedException("token attests commit '" + attested
+                    + "' but '" + requestedSha + "' was requested");
+        }
+        return attested;
     }
 }

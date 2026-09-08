@@ -88,18 +88,38 @@ public abstract class ApprovalPolicy {
 
 **인증 모델** — 승인/거부의 신원은 요청 본문이 아니라 토큰에서만 도출합니다 (`approve`/`reject`는 본문 없음). 그렇지 않으면 아무 토큰이나 가진 사람이 `{"approver":"alice"}`로 남을 사칭할 수 있기 때문입니다.
 
-| 토큰 종류 | 발급 대상 | 할 수 있는 일 |
-|---|---|---|
-| 개인 토큰 (`deployer.api_token_hash`) | 사람 | 본인 명의 check/request, 승인·거부 |
-| CI 서비스 토큰 (`deploygate.ci.token`) | 파이프라인 | 임의 deployer 명의로 check/request (승인·거부 불가) |
+| 자격증명 | 발급 대상 | 신원 증명 | 할 수 있는 일 |
+|---|---|---|---|
+| 개인 토큰 (`deployer.api_token_hash`) | 사람 | 토큰 보유 | 본인 명의 check/request, 승인·거부 |
+| **GitHub OIDC 토큰** | 파이프라인 | **GitHub 서명** | 토큰이 보증한 actor 명의로만 check/request (승인·거부 불가) |
+| CI 서비스 토큰 (`deploygate.ci.token`) | 파이프라인 | 공유 시크릿 | 임의 deployer 명의로 check/request (승인·거부 불가) |
 
-CI 토큰이 승인 투표를 할 수 없어 파이프라인 시크릿이 유출돼도 스스로 배포를 승인할 수 없고, 요청자 본인도 자기 요청을 승인할 수 없습니다(4-eyes). 토큰은 SHA-256 해시로만 저장됩니다.
+파이프라인 자격증명은 승인 투표를 할 수 없어, 유출되더라도 스스로 배포를 승인할 수 없습니다.
+요청자 본인도 자기 요청을 승인할 수 없습니다(4-eyes). 토큰은 SHA-256 해시로만 저장됩니다.
+
+**GitHub OIDC** — 공유 시크릿의 문제는 "나는 파이프라인이고 jiye를 대신한다"는 주장 어느 쪽도
+증명되지 않는다는 점입니다. GitHub Actions가 발급하는 OIDC 토큰은 GitHub이 서명하며 저장소·actor·
+커밋을 담고 있어, 다음이 강제됩니다.
+
+- 남의 이름으로 요청할 수 없음 — `actor` 클레임과 다른 deployer를 지목하면 거부
+- 다른 커밋을 승인받을 수 없음 — 토큰의 `sha`가 커밋 바인딩의 근거가 되고, 본문이 다른 값을 보내면 거부
+- 허용된 저장소·audience에서 발급된 토큰만 인정
+
+```yaml
+# 설정하면 활성화. 비워두면 OIDC는 꺼지고 기존 CI 토큰만 동작합니다.
+deploygate.ci.oidc.issuer: https://token.actions.githubusercontent.com
+deploygate.ci.oidc.jwk-set-uri: https://token.actions.githubusercontent.com/.well-known/jwks
+deploygate.ci.oidc.audience: deploy-gate
+deploygate.ci.oidc.allowed-repositories: owner/repo
+```
+
+OIDC를 쓰려면 deployer의 `name`이 GitHub 로그인과 같아야 합니다(actor 클레임과 매칭).
 
 ## 기술 스택
 
 | 영역 | 기술 |
 |---|---|
-| 서비스 | Spring Boot, Spring Security (Bearer 토큰, SHA-256 해시) |
+| 서비스 | Spring Boot, Spring Security (Bearer 토큰 + GitHub OIDC 검증, SHA-256 해시) |
 | 인가 모델 | Claims 기반 (InfraHub 패턴 재사용) |
 | 연동 대상 | AWS CDK(Java) 스택, GitHub Actions |
 | 모니터링 | Spring Boot Actuator (health/info/metrics, readiness probe) |
