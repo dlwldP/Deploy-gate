@@ -232,7 +232,11 @@ public class ApprovalRequestService {
     private Deployer requireApprover(ApprovalRequest request, String approverName) {
         Deployer approver = deployerRepository.findByName(approverName)
                 .orElseThrow(() -> new DeployerNotFoundException("unknown deployer: " + approverName));
-        String requiredClaim = "stack:" + request.getStackName() + ":approve";
+        // Which claim signs off on a stack is the policy's call, not a naming rule baked
+        // into this method: a stack owned by one team should be approvable by that team.
+        String requiredClaim = stackPolicyRepository.findByStackName(request.getStackName())
+                .map(StackPolicy::approverClaimOrDefault)
+                .orElseGet(() -> "stack:" + request.getStackName() + ":approve");
         if (!approver.getClaims().contains(requiredClaim)) {
             throw new ApproverNotAuthorizedException(approverName + " is missing required claim: " + requiredClaim);
         }

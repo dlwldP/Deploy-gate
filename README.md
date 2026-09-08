@@ -55,11 +55,12 @@ approval_log     감사 로그 — 모든 결정 시점(즉시 승인/거부, �
 | `commit_sha` 바인딩 | 승인은 **그 커밋에만** 유효. 다른 커밋은 자기 승인을 새로 받아야 함 |
 | `approval_ttl_minutes` | 승인 후 이 시간이 지나면 만료 (기본 60분) |
 | `single_use` | 승인이 배포 1회를 인가하고 소진(`CONSUMED`). 재사용(replay) 시 거부 |
+| `approver_claim` | 이 스택을 승인할 수 있는 claim. 미설정 시 `stack:{stack}:approve` 관례를 따름 |
 
 `single_use`가 꺼진 스택은 TTL·커밋 범위 안에서 재시도가 가능해, 파이프라인 재실행이 깨지지 않습니다.
 데모 시더 기준 `ProdAlbStack`은 세 옵션을 모두 켠 가장 엄격한 설정입니다.
 
-승인권자는 별도 개념이 아니라 `"stack:{stack}:approve"` claim을 가진 `Deployer`입니다. 승인 절차는 `ApprovalLevel`에 따라 다형성으로 분기합니다:
+승인권자는 별도 개념이 아니라 승인 claim을 가진 `Deployer`입니다(기본 `"stack:{stack}:approve"`, 정책의 `approver_claim`으로 팀 단위 claim 지정 가능). 승인 절차는 `ApprovalLevel`에 따라 다형성으로 분기합니다:
 
 ```java
 public abstract class ApprovalPolicy {

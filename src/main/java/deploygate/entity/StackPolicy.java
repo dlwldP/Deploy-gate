@@ -42,6 +42,13 @@ public class StackPolicy {
     /** When true, check/request must name the commit being deployed. */
     private Boolean requireCommitSha;
 
+    /**
+     * Claim an approver must hold to sign off on this stack. Null keeps the
+     * {@code stack:{name}:approve} convention; setting it lets a stack be signed off by
+     * a group that owns it rather than by whoever happens to follow the naming rule.
+     */
+    private String approverClaim;
+
     public static final int DEFAULT_APPROVAL_TTL_MINUTES = 60;
 
     public int approvalTtlMinutesOrDefault() {
@@ -56,5 +63,11 @@ public class StackPolicy {
 
     public boolean isRequireCommitSha() {
         return Boolean.TRUE.equals(requireCommitSha);
+    }
+
+    public String approverClaimOrDefault() {
+        return approverClaim != null && !approverClaim.isBlank()
+                ? approverClaim
+                : "stack:" + stackName + ":approve";
     }
 }
